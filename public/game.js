@@ -3,9 +3,10 @@
 /*
  * ONE BALLOON — client
  *
- * Draws a 160x240 virtual screen at an integer scale, so every pixel stays a
- * clean square. The server owns the balloon; this file predicts a few frames
- * ahead to hide latency and then eases back onto whatever the server said.
+ * Draws a 160x240 virtual screen, scaled (via image-rendering: pixelated) to
+ * fill the available space. The server owns the balloon; this file predicts
+ * a few frames ahead to hide latency and then eases back onto whatever the
+ * server said.
  */
 
 // ---------------------------------------------------------------------------
@@ -18,14 +19,30 @@ const ctx = cv.getContext('2d', { alpha: false });
 ctx.imageSmoothingEnabled = false;
 
 function fitCanvas() {
-  const scale = Math.max(
-    1,
-    Math.floor(Math.min((window.innerWidth - 24) / W, (window.innerHeight - 210) / H))
-  );
+  const body = getComputedStyle(document.body);
+  const stage = getComputedStyle(cv.parentElement);
+  const paddingV = parseFloat(body.paddingTop) + parseFloat(body.paddingBottom);
+  const paddingH = parseFloat(body.paddingLeft) + parseFloat(body.paddingRight);
+  const gap = parseFloat(body.rowGap || body.gap) || 0;
+  const stageBorderV = parseFloat(stage.borderTopWidth) + parseFloat(stage.borderBottomWidth);
+  const stageBorderH = parseFloat(stage.borderLeftWidth) + parseFloat(stage.borderRightWidth);
+
+  // .hud, .stage, .hud are the three flex children stacked in body, so their
+  // real rendered heights (not a guessed constant) tell us what's left for
+  // the canvas — this stays correct as the surrounding chrome changes.
+  let hudHeight = 0;
+  document.querySelectorAll('.hud').forEach((h) => { hudHeight += h.getBoundingClientRect().height; });
+
+  const viewportH = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  const availW = window.innerWidth - paddingH - stageBorderH;
+  const availH = viewportH - paddingV - stageBorderV - hudHeight - gap * 2;
+
+  const scale = Math.max(1, Math.min(availW / W, availH / H));
   cv.style.width = W * scale + 'px';
   cv.style.height = H * scale + 'px';
 }
 window.addEventListener('resize', fitCanvas);
+if (window.visualViewport) window.visualViewport.addEventListener('resize', fitCanvas);
 fitCanvas();
 
 // ---------------------------------------------------------------------------
