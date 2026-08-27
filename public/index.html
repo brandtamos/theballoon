@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0d1f">
+<title>The Balloon</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' fill='%230b0d1f'/><rect x='5' y='3' width='6' height='7' fill='%23e04a4a'/><rect x='4' y='4' width='8' height='5' fill='%23e04a4a'/><rect x='7' y='10' width='2' height='4' fill='%23f6f9ff'/></svg>">
+<style>
+  :root {
+    --ink:   #0b0d1f;
+    --panel: #161a34;
+    --line:  #2f3763;
+    --text:  #c8d4ff;
+    --dim:   #6b76ad;
+    --hot:   #ffd75e;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: var(--ink);
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    -webkit-font-smoothing: none;
+    overscroll-behavior: none;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 16px 12px calc(16px + env(safe-area-inset-bottom));
+    /* Faint starfield, drawn with gradients so there are no image requests. */
+    background-image:
+      radial-gradient(1px 1px at 20% 12%, #3a4480 50%, transparent 50%),
+      radial-gradient(1px 1px at 74% 22%, #343d70 50%, transparent 50%),
+      radial-gradient(1px 1px at 12% 68%, #343d70 50%, transparent 50%),
+      radial-gradient(1px 1px at 88% 76%, #2a3160 50%, transparent 50%),
+      radial-gradient(1px 1px at 46% 88%, #2a3160 50%, transparent 50%);
+  }
+
+  .stage {
+    position: relative;
+    line-height: 0;
+    border: 3px solid var(--line);
+    box-shadow: 0 0 0 3px var(--ink), 0 10px 0 0 rgba(0,0,0,.45);
+  }
+
+  canvas {
+    display: block;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+    touch-action: manipulation;
+    cursor: crosshair;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Scanlines. Cheap, and it sells the CRT more than any amount of shader work. */
+  .scanlines {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,.16) 0 1px,
+      transparent 1px 3px
+    );
+    mix-blend-mode: multiply;
+  }
+
+  .hud {
+    width: 100%;
+    max-width: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    text-align: center;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 13px;
+    letter-spacing: .34em;
+    text-transform: uppercase;
+    color: var(--hot);
+    text-shadow: 2px 2px 0 #000;
+  }
+
+  .sub {
+    margin: 0;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--dim);
+    letter-spacing: .06em;
+  }
+
+  .row {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    border: 2px solid var(--line);
+    background: var(--panel);
+    color: var(--text);
+    font: inherit;
+    font-size: 10px;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    padding: 6px 9px;
+    min-height: 30px;
+  }
+
+  .chip b { color: var(--hot); font-weight: 400; }
+
+  button.chip { cursor: pointer; }
+  button.chip:hover { border-color: var(--hot); }
+  button.chip:focus-visible { outline: 2px solid var(--hot); outline-offset: 2px; }
+  button.chip:active { transform: translateY(2px); }
+
+  #status[data-live="0"] { color: #ff8a8a; }
+  #status[data-live="1"] { color: #8affa0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .scanlines { display: none; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="hud">
+    <h1>The Balloon</h1>
+    <p class="sub">There is one balloon and everyone shares it.<br>Click it before it reaches the ground.</p>
+  </div>
+
+  <div class="stage">
+    <canvas id="game" width="160" height="240" aria-label="A pixel balloon drifting above a field"></canvas>
+    <div class="scanlines"></div>
+  </div>
+
+  <div class="hud">
+    <div class="row">
+      <span class="chip" id="status" data-live="0">Connecting</span>
+      <span class="chip">You are <b id="tag">---</b></span>
+      <button class="chip" id="sound" type="button" aria-pressed="true">Sound on</button>
+    </div>
+    <div class="row">
+      <span class="chip">Longest flight <b id="best">--</b></span>
+      <span class="chip">Saves all time <b id="total">--</b></span>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>

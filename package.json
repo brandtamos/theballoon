@@ -1,0 +1,18 @@
+{
+  "name": "one-balloon",
+  "version": "1.0.0",
+  "description": "A single balloon. Everyone on Earth shares it. Click to keep it up.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}
