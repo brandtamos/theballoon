@@ -191,11 +191,17 @@ function clock(ms) {
 const net = {
   x: W / 2, y: 95, vx: 0, vy: 0, g: 17,
   alive: true, color: 0, saves: 0, flightMs: 0, respawnMs: 0,
-  players: 1, stampedAt: performance.now(), bird: null,
+  players: 1, stampedAt: performance.now(), bird: null, kids: [],
 };
 
 // What we actually draw. It chases the prediction instead of teleporting.
 const view = { x: W / 2, y: 95, squash: 0 };
+
+// Kids move slowly and their server-side motion isn't simple velocity (walks,
+// bounces, glides), so instead of predicting physics we just ease the drawn
+// position toward wherever the last state update put them.
+const kidViews = new Map(); // id -> {x, y}
+const kidPrevState = new Map(); // id -> last known state, to catch transitions
 
 let world = { GROUND_Y: 214, CEIL_Y: 30, R: 9 };
 let myId = 0;
@@ -260,7 +266,18 @@ function handle(m) {
       net.alive = !!m.a; net.color = m.c; net.saves = m.n;
       net.flightMs = m.ms; net.respawnMs = m.rs; net.players = m.p;
       net.bird = m.b;
+      net.kids = m.k || [];
       net.stampedAt = performance.now();
+
+      for (const k of net.kids) {
+        const prev = kidPrevState.get(k.id);
+        if (prev && prev !== k.st) {
+          if (k.st === 'falling') { floaters.push({ x: k.x, y: k.y - 12, text: 'WHOOPS!', life: 1, gold: false }); beep('miss'); }
+          else if (k.st === 'bouncing') { floaters.push({ x: k.x, y: k.y - 12, text: 'BOING!', life: 1, gold: true }); beep('save'); }
+          else if (k.st === 'carried') { floaters.push({ x: k.x, y: k.y - 12, text: 'GOTCHA!', life: 1, gold: true }); beep('spawn'); }
+        }
+        kidPrevState.set(k.id, k.st);
+      }
       break;
 
     case 'save':
@@ -541,6 +558,39 @@ function drawBird(t, bx, by, dir) {
   px(x + 2 * dir, y + wing, C.ink);
 }
 
+const KID_SKIN = '#ffd2a6';
+
+function drawKid(t, x, y, st, dir, id) {
+  x = Math.round(x);
+  y = Math.round(y);
+  const shirt = CROWD[id % CROWD.length];
+
+  // Legs: alternate mid-stride while walking, together otherwise.
+  const stride = st === 'walkin' && Math.sin(t / 110) > 0;
+  px(x - 1, y + 3, C.ink);
+  px(x + (stride ? 0 : 1), y + 3, C.ink);
+
+  rect(x - 1, y, 3, 3, shirt);
+  px(x, y - 1, KID_SKIN);
+
+  if (st === 'waiting') {
+    // Arm raised, gesturing toward wherever the balloon currently is.
+    const reach = Math.sin(t / 260) > 0 ? 1 : 0;
+    px(x + dir, y - reach, KID_SKIN);
+    px(x + dir * 2, y - 1 - reach, KID_SKIN);
+  } else if (st === 'attached') {
+    px(x, y - 2, C.string);
+  } else if (st === 'falling' || st === 'bouncing') {
+    // Flailing arms.
+    const flail = Math.sin(t / 60) > 0 ? 1 : -1;
+    px(x - 2, y - flail, KID_SKIN);
+    px(x + 2, y + flail, KID_SKIN);
+  } else if (st === 'carried') {
+    px(x - 1, y - 2, KID_SKIN);
+    px(x + 1, y - 2, KID_SKIN);
+  }
+}
+
 function drawHud(t) {
   rect(0, 0, W, 13, 'rgba(10,12,30,0.72)');
   rect(0, 13, W, 1, C.ink);
@@ -606,6 +656,14 @@ function frame(now) {
     if (c.x > W + 4) { c.x = -c.w - 4; c.y = 34 + Math.random() * 110; }
   }
 
+  const kidEase = 1 - Math.pow(0.002, dt);
+  for (const k of net.kids) {
+    let v = kidViews.get(k.id);
+    if (!v) { v = { x: k.x, y: k.y }; kidViews.set(k.id, v); }
+    v.x += (k.x - v.x) * kidEase;
+    v.y += (k.y - v.y) * kidEase;
+  }
+
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
     p.life -= dt;
@@ -639,6 +697,13 @@ function frame(now) {
   drawSky();
   for (const c of clouds) drawCloud(c);
   drawGround(now);
+
+  for (const k of net.kids) {
+    const v = kidViews.get(k.id);
+    if (!v) continue;
+    drawKid(now, v.x, v.y, k.st, k.d, k.id);
+    if (k.rb !== undefined) drawBird(now, k.rb, v.y - 7, k.rb < v.x ? 1 : -1);
+  }
 
   if (net.bird) {
     const bx = net.bird.x + net.bird.vx * since;

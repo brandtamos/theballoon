@@ -70,6 +70,19 @@ const BIRD_SPEED = 55;          // px/s, faster than the balloon's own drift
 const BIRD_INTERVAL_MIN = 8000; // ms between hazard flybys
 const BIRD_INTERVAL_MAX = 16000;
 
+const KID_SPAWN_MS = 30000;         // a new child wanders in this often
+const KID_WALK_SPEED = 22;          // px/s, walking in from the edge
+const KID_REACH_X = 14;             // how close the balloon must drift to a waiting kid
+const KID_REACH_Y = 40;             // how low the balloon must sink (px above ground) to be grabbable
+const KID_RAPID_MS = 250;           // taps on the balloon closer together than this shake a rider loose
+const KID_FALL_G = 90;              // px/s^2 — kids fall snappier than the balloon floats
+const KID_BOUNCE_VY = -70;          // launch speed off a crowd-catch bounce
+const KID_RESCUE_BIRD_SPEED = 120;  // px/s — the rescue swoop is quicker than the hazard flyby
+const KID_CARRY_MS = 900;           // how long a bird-rescued kid glides down
+const KID_MAX = 20;                 // cap so an unpicked crowd doesn't grow forever
+const KID_FLOCK_SPREAD = 70;        // px — how wide a waiting kid's personal offset from the balloon can be
+const KID_FOLLOW_RATE = 3;          // 1/s — how eagerly a waiting kid closes in on its flock spot
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // ---------------------------------------------------------------------------
@@ -167,6 +180,128 @@ function hitsBird() {
   return dx * dx + dy * dy <= reach * reach;
 }
 
+// Every so often a child wanders in and gestures at the balloon, waiting for
+// it to drift low enough to grab the string. Get trigger-happy with saves
+// while they're riding and they lose their grip — but nobody actually gets
+// hurt in this game: the crowd catches them, or a bird flies them down.
+let kids = [];
+let nextKidId = 1;
+let lastKidSpawnAt = Date.now();
+let lastHitAt = 0;
+
+function attachedKid() {
+  return kids.find((k) => k.state === 'attached');
+}
+
+function spawnKid() {
+  if (kids.length >= KID_MAX) return;
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  // Each kid keeps a fixed personal offset from the balloon for as long as
+  // they're waiting, so the crowd flocks under it as it drifts instead of
+  // camping one spot — but doesn't collapse into a single stacked pixel.
+  const flockOffset = (Math.random() - 0.5) * KID_FLOCK_SPREAD;
+  kids.push({
+    id: nextKidId++,
+    x: dir === 1 ? -8 : W + 8,
+    y: GROUND_Y - 4,
+    standX: clamp(balloon.x + flockOffset, 8, W - 8),
+    flockOffset,
+    dir,
+    vy: 0,
+    state: 'walkin', // walkin -> waiting -> attached -> falling -> bouncing|carried -> waiting
+    rescue: null,
+    rescueBird: null,
+    carryStart: 0,
+    carryFromY: 0,
+  });
+}
+
+// Called when a rider needs to let go, whether from a spam of saves or the
+// balloon popping out from under them.
+function detachKid(kid) {
+  kid.state = 'falling';
+  kid.vy = 10;
+  kid.rescue = kids.some((k) => k !== kid && k.state === 'waiting') ? 'crowd' : 'bird';
+  if (kid.rescue === 'bird') {
+    const side = kid.x < W / 2 ? 1 : -1; // spawn on the roomier side, fly inward
+    kid.rescueBird = { x: clamp(kid.x + side * 40, 0, W), vx: -side * KID_RESCUE_BIRD_SPEED };
+  } else {
+    kid.rescueBird = null;
+  }
+}
+
+function updateKids(dt) {
+  const now = Date.now();
+  if (now - lastKidSpawnAt >= KID_SPAWN_MS) {
+    lastKidSpawnAt = now;
+    spawnKid();
+  }
+
+  for (const kid of kids) {
+    if (kid.state === 'walkin') {
+      kid.x += kid.dir * KID_WALK_SPEED * dt;
+      if ((kid.dir > 0 && kid.x >= kid.standX) || (kid.dir < 0 && kid.x <= kid.standX)) {
+        kid.x = kid.standX;
+        kid.state = 'waiting';
+      }
+    } else if (kid.state === 'waiting') {
+      // Keep closing in on a spot near the balloon, wherever it's drifted to.
+      const target = clamp(balloon.x + kid.flockOffset, 8, W - 8);
+      kid.x += (target - kid.x) * Math.min(KID_FOLLOW_RATE * dt, 1);
+
+      if (
+        balloon.alive &&
+        !attachedKid() &&
+        GROUND_Y - (balloon.y + R) < KID_REACH_Y &&
+        Math.abs(balloon.x - kid.x) < KID_REACH_X
+      ) {
+        kid.state = 'attached';
+      }
+    } else if (kid.state === 'attached') {
+      kid.x = balloon.x;
+      kid.y = balloon.y + R + 9;
+    } else if (kid.state === 'falling') {
+      kid.vy += KID_FALL_G * dt;
+      kid.y += kid.vy * dt;
+
+      if (kid.rescue === 'bird') {
+        const b = kid.rescueBird;
+        b.x += b.vx * dt;
+        if (Math.abs(b.x - kid.x) < 6) {
+          b.x = kid.x;
+          kid.state = 'carried';
+          kid.carryStart = now;
+          kid.carryFromY = kid.y;
+        } else if (kid.y >= GROUND_Y - 4) {
+          kid.y = GROUND_Y - 4;
+          kid.vy = 0;
+          kid.state = 'waiting';
+          kid.rescueBird = null;
+        }
+      } else if (kid.y >= GROUND_Y - 4) {
+        kid.y = GROUND_Y - 4;
+        kid.vy = KID_BOUNCE_VY;
+        kid.state = 'bouncing';
+      }
+    } else if (kid.state === 'bouncing') {
+      kid.vy += KID_FALL_G * dt;
+      kid.y += kid.vy * dt;
+      if (kid.y >= GROUND_Y - 4 && kid.vy > 0) {
+        kid.y = GROUND_Y - 4;
+        kid.vy = 0;
+        kid.state = 'waiting';
+      }
+    } else if (kid.state === 'carried') {
+      const t = Math.min((now - kid.carryStart) / KID_CARRY_MS, 1);
+      kid.y = kid.carryFromY + (GROUND_Y - 4 - kid.carryFromY) * t;
+      if (t >= 1) {
+        kid.state = 'waiting';
+        kid.rescueBird = null;
+      }
+    }
+  }
+}
+
 function respawn() {
   balloon.x = W / 2;
   balloon.y = 95;
@@ -177,6 +312,13 @@ function respawn() {
   balloon.bornAt = Date.now();
   balloon.saves = 0;
   balloon.lastSaverTag = '';
+
+  // Fresh flight, fresh crowd — kids from the last run don't carry over.
+  // (Respawn rather than burst, so a rider's fall/rescue from the pop that
+  // just happened still gets to play out on the game-over screen.)
+  kids = [];
+  lastKidSpawnAt = Date.now();
+
   broadcast({ t: 'spawn', c: balloon.color });
 }
 
@@ -190,6 +332,10 @@ function burst(cause) {
   // Clear the bird so it can't clip the next balloon the instant it spawns.
   bird.active = false;
   nextBirdAt = Date.now() + randBirdDelay();
+
+  // Anyone riding the string comes down with it.
+  const rider = attachedKid();
+  if (rider) detachKid(rider);
 
   records.flights += 1;
   const recordFlight = flightMs > records.bestFlightMs;
@@ -213,6 +359,7 @@ function burst(cause) {
 
 function step(dt) {
   updateBird(dt);
+  updateKids(dt);
 
   if (!balloon.alive) {
     if (Date.now() - balloon.diedAt >= RESPAWN_MS) respawn();
@@ -383,9 +530,6 @@ wss.on('connection', (ws, req) => {
 function tryBoost(player, x, y) {
   if (!balloon.alive) return;
 
-  const now = Date.now();
-  if (now - player.lastBoost < BOOST_COOLDOWN) return;
-
   const dx = x - balloon.x;
   const dy = y - balloon.y;
   const reach = R + GRAB;
@@ -393,6 +537,19 @@ function tryBoost(player, x, y) {
     broadcast({ t: 'miss', x: round1(x), y: round1(y), by: player.id });
     return;
   }
+
+  const now = Date.now();
+
+  // Rapid-fire tapping on the balloon shakes loose anyone riding it. This
+  // checks raw hits rather than successful boosts, so a solo player mashing
+  // still counts even though their own boosts are throttled by BOOST_COOLDOWN.
+  if (now - lastHitAt < KID_RAPID_MS) {
+    const rider = attachedKid();
+    if (rider) detachKid(rider);
+  }
+  lastHitAt = now;
+
+  if (now - player.lastBoost < BOOST_COOLDOWN) return;
 
   player.lastBoost = now;
   player.saves += 1;
@@ -457,6 +614,14 @@ setInterval(() => {
     rs: balloon.alive ? 0 : Math.max(0, RESPAWN_MS - (Date.now() - balloon.diedAt)),
     p: clients.size,
     b: bird.active ? { x: round1(bird.x), y: round1(bird.y), vx: round1(bird.vx) } : null,
+    k: kids.map((kid) => ({
+      id: kid.id,
+      x: round1(kid.x),
+      y: round1(kid.y),
+      st: kid.state,
+      d: kid.dir,
+      rb: kid.rescueBird ? round1(kid.rescueBird.x) : undefined,
+    })),
   });
 }, 1000 / SEND_HZ);
 
