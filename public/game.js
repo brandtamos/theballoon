@@ -558,6 +558,17 @@ function drawBird(t, bx, by, dir) {
   px(x + 2 * dir, y + wing, C.ink);
 }
 
+// Purely cosmetic — a label riding along with the hazard bird. It's just
+// text drawn near the bird's position; it has no hitbox of its own and
+// can't factor into hitsBird() on the server, which only ever sees bird.x/y.
+const BIRD_LABEL = 'WATCH OUT!';
+function drawBirdLabel(t, bx, by) {
+  const bob = Math.sin(t / 150) * 1.5;
+  const x = Math.round(bx - textWidth(BIRD_LABEL) / 2);
+  const y = Math.round(by - 10 + bob);
+  text(BIRD_LABEL, x, y, C.danger);
+}
+
 const KID_SKIN = '#ffd2a6';
 
 function drawKid(t, x, y, st, dir, id) {
@@ -707,7 +718,10 @@ function frame(now) {
 
   if (net.bird) {
     const bx = net.bird.x + net.bird.vx * since;
-    if (bx > -6 && bx < W + 6) drawBird(now, bx, net.bird.y, net.bird.vx >= 0 ? 1 : -1);
+    if (bx > -6 && bx < W + 6) {
+      drawBird(now, bx, net.bird.y, net.bird.vx >= 0 ? 1 : -1);
+      drawBirdLabel(now, bx, net.bird.y);
+    }
   }
 
   if (net.alive) drawBalloon(now);

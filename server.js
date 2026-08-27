@@ -66,9 +66,10 @@ const RESPAWN_MS = 3500;
 const MAX_CLIENTS = 500;
 
 const BIRD_R = 6;               // bird hit radius
-const BIRD_SPEED = 55;          // px/s, faster than the balloon's own drift
+const BIRD_SPEED = 38;          // px/s, faster than the balloon's own drift but reactable
 const BIRD_INTERVAL_MIN = 8000; // ms between hazard flybys
 const BIRD_INTERVAL_MAX = 16000;
+const BIRD_MIN_GAP_Y = 40;      // never spawn closer than this to the balloon's current height
 
 const KID_SPAWN_MS = 30000;         // a new child wanders in this often
 const KID_WALK_SPEED = 22;          // px/s, walking in from the edge
@@ -153,11 +154,22 @@ function randBirdDelay() {
 }
 
 function spawnBird() {
-  const dir = Math.random() < 0.5 ? 1 : -1;
+  // Enter from the side opposite wherever the balloon currently is, so it
+  // always has to cross most of the screen before it's a threat.
+  const dir = balloon.x < W / 2 ? -1 : 1;
   bird.active = true;
   bird.vx = BIRD_SPEED * dir;
-  bird.y = CEIL_Y + 15 + Math.random() * (GROUND_Y - CEIL_Y - 70);
   bird.x = dir === 1 ? -10 : W + 10;
+
+  // Keep well clear of wherever the balloon currently is — spawning right
+  // on top of it is an unavoidable, unfair pop rather than a dodgeable hazard.
+  const lo = CEIL_Y + 15;
+  const hi = GROUND_Y - 55;
+  let y = lo + Math.random() * (hi - lo);
+  for (let tries = 0; tries < 20 && Math.abs(y - balloon.y) < BIRD_MIN_GAP_Y; tries++) {
+    y = lo + Math.random() * (hi - lo);
+  }
+  bird.y = y;
 }
 
 function updateBird(dt) {
