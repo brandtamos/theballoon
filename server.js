@@ -65,6 +65,11 @@ const MSG_BUDGET = 25;      // messages per second per socket before we ignore t
 const RESPAWN_MS = 3500;
 const MAX_CLIENTS = 500;
 
+const BIRD_R = 6;               // bird hit radius
+const BIRD_SPEED = 55;          // px/s, faster than the balloon's own drift
+const BIRD_INTERVAL_MIN = 8000; // ms between hazard flybys
+const BIRD_INTERVAL_MAX = 16000;
+
 const clamp = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
 
 // ---------------------------------------------------------------------------
@@ -97,6 +102,18 @@ function persist() {
 }
 setInterval(persist, 10000).unref();
 
+// Shutdown needs a blocking write: process.exit() can fire before the async
+// persist() above finishes, dropping whatever changed in the last <10s.
+function persistSync() {
+  if (!recordsDirty) return;
+  recordsDirty = false;
+  try {
+    fs.writeFileSync(SAVE_FILE, JSON.stringify(records));
+  } catch (err) {
+    console.error('Could not write records:', err.message);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // The balloon
 // ---------------------------------------------------------------------------
@@ -113,6 +130,43 @@ const balloon = {
   lastSaverTag: '',
 };
 
+// A bird crosses the sky every so often. It doesn't care about the balloon,
+// but if their paths cross the balloon pops just like it hit the ground.
+const bird = { active: false, x: 0, y: 0, vx: 0 };
+let nextBirdAt = Date.now() + randBirdDelay();
+
+function randBirdDelay() {
+  return BIRD_INTERVAL_MIN + Math.random() * (BIRD_INTERVAL_MAX - BIRD_INTERVAL_MIN);
+}
+
+function spawnBird() {
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  bird.active = true;
+  bird.vx = BIRD_SPEED * dir;
+  bird.y = CEIL_Y + 15 + Math.random() * (GROUND_Y - CEIL_Y - 70);
+  bird.x = dir === 1 ? -10 : W + 10;
+}
+
+function updateBird(dt) {
+  const now = Date.now();
+  if (!bird.active) {
+    if (now >= nextBirdAt) spawnBird();
+    return;
+  }
+  bird.x += bird.vx * dt;
+  if (bird.x < -20 || bird.x > W + 20) {
+    bird.active = false;
+    nextBirdAt = now + randBirdDelay();
+  }
+}
+
+function hitsBird() {
+  const dx = balloon.x - bird.x;
+  const dy = balloon.y - bird.y;
+  const reach = R + BIRD_R;
+  return dx * dx + dy * dy <= reach * reach;
+}
+
 function respawn() {
   balloon.x = W / 2;
   balloon.y = 95;
@@ -126,12 +180,16 @@ function respawn() {
   broadcast({ t: 'spawn', c: balloon.color });
 }
 
-function burst() {
+function burst(cause) {
   const flightMs = Date.now() - balloon.bornAt;
   balloon.alive = false;
   balloon.diedAt = Date.now();
   balloon.vx = 0;
   balloon.vy = 0;
+
+  // Clear the bird so it can't clip the next balloon the instant it spawns.
+  bird.active = false;
+  nextBirdAt = Date.now() + randBirdDelay();
 
   records.flights += 1;
   const recordFlight = flightMs > records.bestFlightMs;
@@ -149,10 +207,13 @@ function burst() {
     saves: balloon.saves,
     rec: recordFlight || recordSaves,
     r: records,
+    cause: cause || 'ground',
   });
 }
 
 function step(dt) {
+  updateBird(dt);
+
   if (!balloon.alive) {
     if (Date.now() - balloon.diedAt >= RESPAWN_MS) respawn();
     return;
@@ -180,7 +241,12 @@ function step(dt) {
     if (balloon.vy < 0) balloon.vy *= -0.25;
   }
 
-  if (balloon.y + R >= GROUND_Y) burst();
+  if (balloon.y + R >= GROUND_Y) {
+    burst('ground');
+    return;
+  }
+
+  if (bird.active && hitsBird()) burst('bird');
 }
 
 // Gravity creeps up over a flight. Without this, a busy day would mean the
@@ -390,6 +456,7 @@ setInterval(() => {
     ms: balloon.alive ? Date.now() - balloon.bornAt : 0,
     rs: balloon.alive ? 0 : Math.max(0, RESPAWN_MS - (Date.now() - balloon.diedAt)),
     p: clients.size,
+    b: bird.active ? { x: round1(bird.x), y: round1(bird.y), vx: round1(bird.vx) } : null,
   });
 }, 1000 / SEND_HZ);
 
@@ -399,8 +466,7 @@ server.listen(PORT, () => {
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => {
-    recordsDirty = true;
-    persist();
+    persistSync();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 500).unref();
   });

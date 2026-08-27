@@ -191,7 +191,7 @@ function clock(ms) {
 const net = {
   x: W / 2, y: 95, vx: 0, vy: 0, g: 17,
   alive: true, color: 0, saves: 0, flightMs: 0, respawnMs: 0,
-  players: 1, stampedAt: performance.now(),
+  players: 1, stampedAt: performance.now(), bird: null,
 };
 
 // What we actually draw. It chases the prediction instead of teleporting.
@@ -259,6 +259,7 @@ function handle(m) {
       net.x = m.x; net.y = m.y; net.vx = m.vx; net.vy = m.vy; net.g = m.g;
       net.alive = !!m.a; net.color = m.c; net.saves = m.n;
       net.flightMs = m.ms; net.respawnMs = m.rs; net.players = m.p;
+      net.bird = m.b;
       net.stampedAt = performance.now();
       break;
 
@@ -281,7 +282,7 @@ function handle(m) {
     case 'burst':
       confetti(m.x, m.y, SKINS[net.color].m, 34);
       shake = 7;
-      lastRun = { ms: m.ms, saves: m.saves, record: m.rec };
+      lastRun = { ms: m.ms, saves: m.saves, record: m.rec, cause: m.cause };
       beep('burst');
       showRecords(m.r);
       break;
@@ -528,6 +529,18 @@ function drawBalloon(t) {
   }
 }
 
+function drawBird(t, bx, by, dir) {
+  const x = Math.round(bx);
+  const y = Math.round(by);
+  const up = Math.sin(t / 80) > 0;
+  const wing = up ? -1 : 1;
+  px(x, y, C.ink);
+  px(x - 1 * dir, y, C.ink);
+  px(x + 1 * dir, y, C.ink);
+  px(x - 2 * dir, y + wing, C.ink);
+  px(x + 2 * dir, y + wing, C.ink);
+}
+
 function drawHud(t) {
   rect(0, 0, W, 13, 'rgba(10,12,30,0.72)');
   rect(0, 13, W, 1, C.ink);
@@ -556,7 +569,8 @@ function drawGameOver() {
   rect(0, 92, W, 1, C.danger);
   rect(0, 147, W, 1, C.danger);
 
-  textCenter('THE BALLOON POPPED', 100, C.danger);
+  const headline = lastRun && lastRun.cause === 'bird' ? 'BALLOON POPPED BY BIRD!' : 'THE BALLOON POPPED';
+  textCenter(headline, 100, C.danger);
   if (lastRun) {
     textCenter('IT FLEW ' + clock(lastRun.ms), 112, C.white);
     textCenter(lastRun.saves + ' SAVES', 121, C.white);
@@ -625,6 +639,11 @@ function frame(now) {
   drawSky();
   for (const c of clouds) drawCloud(c);
   drawGround(now);
+
+  if (net.bird) {
+    const bx = net.bird.x + net.bird.vx * since;
+    if (bx > -6 && bx < W + 6) drawBird(now, bx, net.bird.y, net.bird.vx >= 0 ? 1 : -1);
+  }
 
   if (net.alive) drawBalloon(now);
 
