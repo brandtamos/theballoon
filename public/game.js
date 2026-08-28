@@ -203,7 +203,7 @@ const view = { x: W / 2, y: 95, squash: 0 };
 const kidViews = new Map(); // id -> {x, y}
 const kidPrevState = new Map(); // id -> last known state, to catch transitions
 
-let world = { GROUND_Y: 214, CEIL_Y: 30, R: 9 };
+let world = { GROUND_Y: 214, CEIL_Y: 30, R: 9, GRAB: 10 };
 let myId = 0;
 let connected = false;
 let ws = null;
@@ -344,7 +344,7 @@ cv.addEventListener('pointerdown', (ev) => {
   // pulls us back within a couple of frames and nobody notices.
   const dx = p.x - view.x;
   const dy = p.y - view.y;
-  const reach = world.R + 5;
+  const reach = world.R + world.GRAB;
   const now = performance.now();
   if (net.alive && dx * dx + dy * dy <= reach * reach && now - localCooldown > 300) {
     localCooldown = now;

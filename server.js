@@ -50,7 +50,7 @@ const H = 240;
 const GROUND_Y = 214;      // y of the top of the grass
 const CEIL_Y = 30;         // balloon can't go above this
 const R = 9;               // balloon hit radius
-const GRAB = 5;            // extra forgiveness on the hit test (fat fingers)
+const GRAB = 10;           // extra forgiveness on the hit test (fat fingers, mobile taps)
 
 const GRAVITY = 17;        // px/s^2 at the start of a flight
 const RAMP_SECONDS = 240;  // gravity doubles over this long, so runs must end
@@ -509,7 +509,7 @@ wss.on('connection', (ws, req) => {
     t: 'hello',
     id: player.id,
     tag: player.tag,
-    world: { W, H, GROUND_Y, CEIL_Y, R },
+    world: { W, H, GROUND_Y, CEIL_Y, R, GRAB },
     r: records,
     c: balloon.color,
   }));
