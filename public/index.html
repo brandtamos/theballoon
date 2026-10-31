@@ -137,6 +137,36 @@
   #status[data-live="0"] { color: #ff8a8a; }
   #status[data-live="1"] { color: #8affa0; }
 
+  /* Quick chat sits on top of the canvas, over the dirt strip at the bottom. */
+  .chat {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    line-height: normal;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
+  .chat .chip {
+    background: rgba(22, 26, 52, .92);
+    touch-action: manipulation;
+  }
+
+  .chat-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px;
+    padding: 4px;
+    border: 2px solid var(--line);
+    background: rgba(11, 13, 31, .9);
+  }
+
+  .chat-panel[hidden] { display: none; }
+  .chat-panel .chip { white-space: nowrap; }
+  .chat-panel .chip:disabled { opacity: .45; cursor: default; }
+
   @media (prefers-reduced-motion: reduce) {
     .scanlines { display: none; }
   }
@@ -152,6 +182,10 @@
   <div class="stage">
     <canvas id="game" width="160" height="240" aria-label="A pixel balloon drifting above a field"></canvas>
     <div class="scanlines"></div>
+    <div class="chat">
+      <button class="chip" id="chat-toggle" type="button" aria-expanded="false" aria-controls="chat-panel">Chat</button>
+      <div class="chat-panel" id="chat-panel" hidden></div>
+    </div>
   </div>
 
   <div class="hud">

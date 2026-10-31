@@ -66,6 +66,12 @@ const MSG_BUDGET = 25;      // messages per second per socket before we ignore t
 const RESPAWN_MS = 3500;
 const MAX_CLIENTS = 500;
 
+// Quick chat. Clients send an index into this list, never free text, so there
+// is nothing to moderate. Stick to glyphs the client's bitmap font has:
+// A-Z 0-9 space . : - + ! ? / '
+const PHRASES = ['WAZZUP', 'YEA!', 'LETS GO!', 'GO GO GO!', 'OMG!', 'THANKS!', 'DAMB', 'GG'];
+const CHAT_COOLDOWN = 1500; // ms between one person's chat messages
+
 const KID_SPAWN_MS = 30000;         // a new child wanders in this often
 const KID_WALK_SPEED = 22;          // px/s, walking in from the edge
 const KID_REACH_X = 14;             // how close the balloon must drift to a waiting kid
@@ -433,6 +439,7 @@ wss.on('connection', (ws, req) => {
     id: nextId++,
     tag: makeTag(),
     lastBoost: 0,
+    lastChat: 0,
     saves: 0,
     budget: MSG_BUDGET,
     alive: true,
@@ -444,6 +451,7 @@ wss.on('connection', (ws, req) => {
     id: player.id,
     tag: player.tag,
     world: { W, H, GROUND_Y, CEIL_Y, R, GRAB, SINK, DRAG },
+    phrases: PHRASES,
     r: records,
     c: balloon.color,
   }));
@@ -458,7 +466,13 @@ wss.on('connection', (ws, req) => {
     } catch {
       return;
     }
-    if (!msg || msg.t !== 'tap') return;
+    if (!msg) return;
+
+    if (msg.t === 'chat') {
+      tryChat(player, msg.i);
+      return;
+    }
+    if (msg.t !== 'tap') return;
 
     const x = Number(msg.x);
     const y = Number(msg.y);
@@ -518,6 +532,14 @@ function tryBoost(player, x, y) {
     n: balloon.saves,
     total: records.totalSaves,
   });
+}
+
+function tryChat(player, i) {
+  if (!Number.isInteger(i) || i < 0 || i >= PHRASES.length) return;
+  const now = Date.now();
+  if (now - player.lastChat < CHAT_COOLDOWN) return;
+  player.lastChat = now;
+  broadcast({ t: 'chat', by: player.id, tag: player.tag, i });
 }
 
 // Drop sockets that stopped answering, and refill the per-second message budget.

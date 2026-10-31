@@ -218,6 +218,8 @@ const els = {
   best: document.getElementById('best'),
   total: document.getElementById('total'),
   sound: document.getElementById('sound'),
+  chatToggle: document.getElementById('chat-toggle'),
+  chatPanel: document.getElementById('chat-panel'),
 };
 
 function setStatus(label, live) {
@@ -261,6 +263,7 @@ function handle(m) {
       myId = m.id;
       world = m.world;
       els.tag.textContent = m.tag;
+      buildChat(m.phrases || []);
       showRecords(m.r);
       break;
 
@@ -304,6 +307,13 @@ function handle(m) {
       lastRun = { ms: m.ms, saves: m.saves, record: m.rec };
       beep('burst');
       showRecords(m.r);
+      break;
+
+    case 'chat':
+      if (phrases[m.i] === undefined) break;
+      chatLog.push({ tag: m.tag, text: phrases[m.i], at: performance.now(), mine: m.by === myId });
+      if (chatLog.length > CHAT_LINES) chatLog.shift();
+      if (m.by !== myId) beep('chat');
       break;
 
     case 'spawn':
@@ -364,6 +374,49 @@ cv.addEventListener('pointerdown', (ev) => {
 });
 
 cv.addEventListener('contextmenu', (ev) => ev.preventDefault());
+
+// ---------------------------------------------------------------------------
+// Quick chat. The server sends the phrase list; we only ever send an index.
+// ---------------------------------------------------------------------------
+const CHAT_LINES = 4;
+const CHAT_TTL = 6000;     // ms a line stays on screen
+const CHAT_COOLDOWN = 1500; // mirrors the server, so buttons grey out instead of silently dropping
+let phrases = [];
+const chatLog = [];
+
+function setChatOpen(open) {
+  els.chatPanel.hidden = !open;
+  els.chatToggle.setAttribute('aria-expanded', String(open));
+}
+
+function buildChat(list) {
+  phrases = list;
+  els.chatPanel.replaceChildren(...list.map((label, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.textContent = label;
+    b.addEventListener('click', () => sendChat(i));
+    return b;
+  }));
+}
+
+function sendChat(i) {
+  if (!connected || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ t: 'chat', i }));
+  setChatOpen(false);
+  const buttons = els.chatPanel.querySelectorAll('button');
+  buttons.forEach((b) => { b.disabled = true; });
+  setTimeout(() => buttons.forEach((b) => { b.disabled = false; }), CHAT_COOLDOWN);
+}
+
+els.chatToggle.addEventListener('click', () => {
+  unlockAudio();
+  setChatOpen(els.chatPanel.hidden);
+});
+
+// Tapping the game closes the menu so it never sits over the balloon.
+cv.addEventListener('pointerdown', () => setChatOpen(false));
 
 // ---------------------------------------------------------------------------
 // Particles
@@ -447,6 +500,7 @@ function beep(kind) {
   else if (kind === 'burst') { tone(320, 60, 0.35, 0.09, 'sawtooth'); tone(180, 40, 0.4, 0.06); }
   else if (kind === 'spawn') { tone(400, 660, 0.12, 0.05); }
   else if (kind === 'warn') tone(240, 200, 0.06, 0.035);
+  else if (kind === 'chat') tone(700, 700, 0.04, 0.03);
 }
 
 // ---------------------------------------------------------------------------
@@ -616,6 +670,21 @@ function drawHud(t) {
   }
 }
 
+function drawChat(t) {
+  while (chatLog.length && t - chatLog[0].at > CHAT_TTL) chatLog.shift();
+  let y = 17;
+  for (const line of chatLog) {
+    // Fade out over the last second so lines don't just vanish.
+    const left = CHAT_TTL - (t - line.at);
+    ctx.globalAlpha = Math.max(0, Math.min(left / 1000, 1));
+    const str = line.tag + ': ' + line.text;
+    rect(2, y - 1, textWidth(str) + 4, 7, 'rgba(10,12,30,0.6)');
+    text(str, 4, y, line.mine ? C.gold : C.white);
+    y += 8;
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawGameOver() {
   rect(0, 92, W, 56, 'rgba(10,12,30,0.86)');
   rect(0, 92, W, 1, C.danger);
@@ -718,6 +787,7 @@ function frame(now) {
   }
 
   drawHud(now);
+  drawChat(now);
   if (!net.alive) drawGameOver();
   if (!connected) {
     rect(0, 110, W, 20, 'rgba(10,12,30,0.9)');
