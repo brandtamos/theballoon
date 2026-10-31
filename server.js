@@ -97,8 +97,9 @@ const records = {
   bestSaves: 0,
 };
 
+let disk = {};
 try {
-  const disk = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8'));
+  disk = JSON.parse(fs.readFileSync(SAVE_FILE, 'utf8')) || {};
   for (const k of Object.keys(records)) {
     if (Number.isFinite(disk[k])) records[k] = disk[k];
   }
@@ -108,11 +109,39 @@ try {
 }
 
 let recordsDirty = false;
+
+// The in-flight balloon is saved alongside the records. Flights last an hour,
+// so a restart or deploy shouldn't throw one away.
+function snapshot() {
+  const flight = balloon.alive
+    ? {
+        x: balloon.x,
+        y: balloon.y,
+        vx: balloon.vx,
+        vy: balloon.vy,
+        color: balloon.color,
+        saves: balloon.saves,
+        lastSaverTag: balloon.lastSaverTag,
+        ms: Date.now() - balloon.bornAt,
+      }
+    : null;
+  return JSON.stringify({ ...records, flight });
+}
+
+// Write to a temp file and rename over the real one, so a crash mid-write
+// can never leave a truncated state.json behind.
+const TMP_FILE = SAVE_FILE + '.tmp';
+
+// The balloon moves constantly, so while it's alive there is always something
+// new to save; when it's popped, only write if the records changed.
 function persist() {
-  if (!recordsDirty) return;
+  if (!recordsDirty && !balloon.alive) return;
   recordsDirty = false;
-  fs.writeFile(SAVE_FILE, JSON.stringify(records), (err) => {
-    if (err) console.error('Could not write records:', err.message);
+  fs.writeFile(TMP_FILE, snapshot(), (err) => {
+    if (err) return console.error('Could not write state:', err.message);
+    fs.rename(TMP_FILE, SAVE_FILE, (err2) => {
+      if (err2) console.error('Could not write state:', err2.message);
+    });
   });
 }
 setInterval(persist, 10000).unref();
@@ -120,12 +149,12 @@ setInterval(persist, 10000).unref();
 // Shutdown needs a blocking write: process.exit() can fire before the async
 // persist() above finishes, dropping whatever changed in the last <10s.
 function persistSync() {
-  if (!recordsDirty) return;
   recordsDirty = false;
   try {
-    fs.writeFileSync(SAVE_FILE, JSON.stringify(records));
+    fs.writeFileSync(TMP_FILE, snapshot());
+    fs.renameSync(TMP_FILE, SAVE_FILE);
   } catch (err) {
-    console.error('Could not write records:', err.message);
+    console.error('Could not write state:', err.message);
   }
 }
 
@@ -144,6 +173,21 @@ const balloon = {
   saves: 0,
   lastSaverTag: '',
 };
+
+// Pick up where the last process left off. Time spent down doesn't count as
+// flight time, since nobody could see or save the balloon during it.
+const saved = disk.flight;
+if (saved && ['x', 'y', 'vx', 'vy', 'color', 'saves', 'ms'].every((k) => Number.isFinite(saved[k]))) {
+  balloon.x = clamp(saved.x, R + 2, W - R - 2);
+  balloon.y = clamp(saved.y, CEIL_Y, GROUND_Y - R - 1);
+  balloon.vx = clamp(saved.vx, -DRIFT, DRIFT);
+  balloon.vy = saved.vy;
+  balloon.color = saved.color % 6;
+  balloon.saves = saved.saves;
+  balloon.lastSaverTag = typeof saved.lastSaverTag === 'string' ? saved.lastSaverTag : '';
+  balloon.bornAt = Date.now() - Math.max(0, saved.ms);
+  console.log('Resumed flight at', Math.round(saved.ms / 1000) + 's');
+}
 
 // Every so often a child wanders in and gestures at the balloon, waiting for
 // it to drift low enough to grab the string. Get trigger-happy with saves
