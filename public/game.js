@@ -273,6 +273,7 @@ function handle(m) {
       net.flightMs = m.ms; net.respawnMs = m.rs; net.players = m.p;
       net.kids = m.k || [];
       net.stampedAt = performance.now();
+      showBest();
 
       for (const k of net.kids) {
         const prev = kidPrevState.get(k.id);
@@ -324,10 +325,23 @@ function handle(m) {
   }
 }
 
+let records = { bestFlightMs: 0, bestSaves: 0 };
+
 function showRecords(r) {
   if (!r) return;
-  els.best.textContent = clock(r.bestFlightMs) + ' / ' + r.bestSaves + ' saves';
+  records = r;
+  showBest();
   els.total.textContent = r.totalSaves.toLocaleString();
+}
+
+// The current flight counts toward the record as it happens, so the chip ticks
+// up live once it's ahead instead of waiting for the pop to make it official.
+function showBest() {
+  const live = net.alive;
+  const ms = Math.max(records.bestFlightMs, live ? net.flightMs : 0);
+  const saves = Math.max(records.bestSaves, live ? net.saves : 0);
+  const label = clock(ms) + ' / ' + saves + ' saves';
+  if (els.best.textContent !== label) els.best.textContent = label;
 }
 
 // ---------------------------------------------------------------------------
