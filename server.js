@@ -52,10 +52,11 @@ const CEIL_Y = 30;         // balloon can't go above this
 const R = 9;               // balloon hit radius
 const GRAB = 10;           // extra forgiveness on the hit test (fat fingers, mobile taps)
 
-const GRAVITY = 17;        // px/s^2 at the start of a flight
-const RAMP_SECONDS = 240;  // gravity doubles over this long, so runs must end
-const BOOST_VY = -40;      // px/s the balloon is set to when someone saves it
-const MAX_FALL = 70;       // px/s terminal velocity
+const SPAWN_Y = 95;         // where each new balloon starts
+const FALL_HOURS = 1;      // an untouched balloon takes this long to reach the ground
+const SINK = (GROUND_Y - R - SPAWN_Y) / (FALL_HOURS * 3600); // px/s steady descent
+const DRAG = 1;            // 1/s — how fast a save's upward kick bleeds back to SINK
+const BOOST_VY = -40;      // px/s the balloon is set to when someone saves it (rises ~BOOST_VY/DRAG px)
 const DRIFT = 15;          // max horizontal speed
 
 const TICK_HZ = 30;
@@ -65,12 +66,6 @@ const MSG_BUDGET = 25;      // messages per second per socket before we ignore t
 const RESPAWN_MS = 3500;
 const MAX_CLIENTS = 500;
 
-const BIRD_R = 6;               // bird hit radius
-const BIRD_SPEED = 38;          // px/s, faster than the balloon's own drift but reactable
-const BIRD_INTERVAL_MIN = 8000; // ms between hazard flybys
-const BIRD_INTERVAL_MAX = 16000;
-const BIRD_MIN_GAP_Y = 40;      // never spawn closer than this to the balloon's current height
-
 const KID_SPAWN_MS = 30000;         // a new child wanders in this often
 const KID_WALK_SPEED = 22;          // px/s, walking in from the edge
 const KID_REACH_X = 14;             // how close the balloon must drift to a waiting kid
@@ -78,7 +73,7 @@ const KID_REACH_Y = 40;             // how low the balloon must sink (px above g
 const KID_RAPID_MS = 250;           // taps on the balloon closer together than this shake a rider loose
 const KID_FALL_G = 90;              // px/s^2 — kids fall snappier than the balloon floats
 const KID_BOUNCE_VY = -70;          // launch speed off a crowd-catch bounce
-const KID_RESCUE_BIRD_SPEED = 120;  // px/s — the rescue swoop is quicker than the hazard flyby
+const KID_RESCUE_BIRD_SPEED = 120;  // px/s — speed of the bird that swoops in to catch a falling kid
 const KID_CARRY_MS = 900;           // how long a bird-rescued kid glides down
 const KID_MAX = 20;                 // cap so an unpicked crowd doesn't grow forever
 const KID_FLOCK_SPREAD = 70;        // px — how wide a waiting kid's personal offset from the balloon can be
@@ -133,7 +128,7 @@ function persistSync() {
 // ---------------------------------------------------------------------------
 const balloon = {
   x: W / 2,
-  y: 95,
+  y: SPAWN_Y,
   vx: 7,
   vy: 0,
   alive: true,
@@ -143,54 +138,6 @@ const balloon = {
   saves: 0,
   lastSaverTag: '',
 };
-
-// A bird crosses the sky every so often. It doesn't care about the balloon,
-// but if their paths cross the balloon pops just like it hit the ground.
-const bird = { active: false, x: 0, y: 0, vx: 0 };
-let nextBirdAt = Date.now() + randBirdDelay();
-
-function randBirdDelay() {
-  return BIRD_INTERVAL_MIN + Math.random() * (BIRD_INTERVAL_MAX - BIRD_INTERVAL_MIN);
-}
-
-function spawnBird() {
-  // Enter from the side opposite wherever the balloon currently is, so it
-  // always has to cross most of the screen before it's a threat.
-  const dir = balloon.x < W / 2 ? -1 : 1;
-  bird.active = true;
-  bird.vx = BIRD_SPEED * dir;
-  bird.x = dir === 1 ? -10 : W + 10;
-
-  // Keep well clear of wherever the balloon currently is — spawning right
-  // on top of it is an unavoidable, unfair pop rather than a dodgeable hazard.
-  const lo = CEIL_Y + 15;
-  const hi = GROUND_Y - 55;
-  let y = lo + Math.random() * (hi - lo);
-  for (let tries = 0; tries < 20 && Math.abs(y - balloon.y) < BIRD_MIN_GAP_Y; tries++) {
-    y = lo + Math.random() * (hi - lo);
-  }
-  bird.y = y;
-}
-
-function updateBird(dt) {
-  const now = Date.now();
-  if (!bird.active) {
-    if (now >= nextBirdAt) spawnBird();
-    return;
-  }
-  bird.x += bird.vx * dt;
-  if (bird.x < -20 || bird.x > W + 20) {
-    bird.active = false;
-    nextBirdAt = now + randBirdDelay();
-  }
-}
-
-function hitsBird() {
-  const dx = balloon.x - bird.x;
-  const dy = balloon.y - bird.y;
-  const reach = R + BIRD_R;
-  return dx * dx + dy * dy <= reach * reach;
-}
 
 // Every so often a child wanders in and gestures at the balloon, waiting for
 // it to drift low enough to grab the string. Get trigger-happy with saves
@@ -316,7 +263,7 @@ function updateKids(dt) {
 
 function respawn() {
   balloon.x = W / 2;
-  balloon.y = 95;
+  balloon.y = SPAWN_Y;
   balloon.vx = Math.random() < 0.5 ? -7 : 7;
   balloon.vy = 0;
   balloon.alive = true;
@@ -334,16 +281,12 @@ function respawn() {
   broadcast({ t: 'spawn', c: balloon.color });
 }
 
-function burst(cause) {
+function burst() {
   const flightMs = Date.now() - balloon.bornAt;
   balloon.alive = false;
   balloon.diedAt = Date.now();
   balloon.vx = 0;
   balloon.vy = 0;
-
-  // Clear the bird so it can't clip the next balloon the instant it spawns.
-  bird.active = false;
-  nextBirdAt = Date.now() + randBirdDelay();
 
   // Anyone riding the string comes down with it.
   const rider = attachedKid();
@@ -365,12 +308,10 @@ function burst(cause) {
     saves: balloon.saves,
     rec: recordFlight || recordSaves,
     r: records,
-    cause: cause || 'ground',
   });
 }
 
 function step(dt) {
-  updateBird(dt);
   updateKids(dt);
 
   if (!balloon.alive) {
@@ -378,7 +319,9 @@ function step(dt) {
     return;
   }
 
-  balloon.vy = Math.min(balloon.vy + gravityNow() * dt, MAX_FALL);
+  // Buoyant, not ballistic: velocity relaxes toward a slow steady sink, so a
+  // save lifts it a bit and then it drifts back down over hours.
+  balloon.vy += (SINK - balloon.vy) * Math.min(DRAG * dt, 1);
   balloon.y += balloon.vy * dt;
 
   // A little wandering so it is never in the same place twice.
@@ -401,18 +344,9 @@ function step(dt) {
   }
 
   if (balloon.y + R >= GROUND_Y) {
-    burst('ground');
+    burst();
     return;
   }
-
-  if (bird.active && hitsBird()) burst('bird');
-}
-
-// Gravity creeps up over a flight. Without this, a busy day would mean the
-// balloon never comes down and there is no game left to play.
-function gravityNow() {
-  const secs = (Date.now() - balloon.bornAt) / 1000;
-  return GRAVITY * (1 + Math.min(secs / RAMP_SECONDS, 1));
 }
 
 // ---------------------------------------------------------------------------
@@ -509,7 +443,7 @@ wss.on('connection', (ws, req) => {
     t: 'hello',
     id: player.id,
     tag: player.tag,
-    world: { W, H, GROUND_Y, CEIL_Y, R, GRAB },
+    world: { W, H, GROUND_Y, CEIL_Y, R, GRAB, SINK, DRAG },
     r: records,
     c: balloon.color,
   }));
@@ -618,14 +552,12 @@ setInterval(() => {
     y: round1(balloon.y),
     vx: round1(balloon.vx),
     vy: round1(balloon.vy),
-    g: round1(gravityNow()),
     a: balloon.alive ? 1 : 0,
     c: balloon.color,
     n: balloon.saves,
     ms: balloon.alive ? Date.now() - balloon.bornAt : 0,
     rs: balloon.alive ? 0 : Math.max(0, RESPAWN_MS - (Date.now() - balloon.diedAt)),
     p: clients.size,
-    b: bird.active ? { x: round1(bird.x), y: round1(bird.y), vx: round1(bird.vx) } : null,
     k: kids.map((kid) => ({
       id: kid.id,
       x: round1(kid.x),

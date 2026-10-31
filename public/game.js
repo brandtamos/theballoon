@@ -182,16 +182,19 @@ function pad(n, len) {
 
 function clock(ms) {
   const total = Math.floor(ms / 1000);
-  return pad(Math.floor(total / 60), 2) + ':' + pad(total % 60, 2);
+  const d = Math.floor(total / 86400);
+  const h = Math.floor(total / 3600) % 24;
+  const m = Math.floor(total / 60) % 60;
+  return d + 'D ' + pad(h, 2) + 'H ' + pad(m, 2) + 'M ' + pad(total % 60, 2) + 'S';
 }
 
 // ---------------------------------------------------------------------------
 // Network state
 // ---------------------------------------------------------------------------
 const net = {
-  x: W / 2, y: 95, vx: 0, vy: 0, g: 17,
+  x: W / 2, y: 95, vx: 0, vy: 0,
   alive: true, color: 0, saves: 0, flightMs: 0, respawnMs: 0,
-  players: 1, stampedAt: performance.now(), bird: null, kids: [],
+  players: 1, stampedAt: performance.now(), kids: [],
 };
 
 // What we actually draw. It chases the prediction instead of teleporting.
@@ -203,7 +206,7 @@ const view = { x: W / 2, y: 95, squash: 0 };
 const kidViews = new Map(); // id -> {x, y}
 const kidPrevState = new Map(); // id -> last known state, to catch transitions
 
-let world = { GROUND_Y: 214, CEIL_Y: 30, R: 9, GRAB: 10 };
+let world = { GROUND_Y: 214, CEIL_Y: 30, R: 9, GRAB: 10, SINK: 110 / 3600, DRAG: 1 };
 let myId = 0;
 let connected = false;
 let ws = null;
@@ -262,10 +265,9 @@ function handle(m) {
       break;
 
     case 's':
-      net.x = m.x; net.y = m.y; net.vx = m.vx; net.vy = m.vy; net.g = m.g;
+      net.x = m.x; net.y = m.y; net.vx = m.vx; net.vy = m.vy;
       net.alive = !!m.a; net.color = m.c; net.saves = m.n;
       net.flightMs = m.ms; net.respawnMs = m.rs; net.players = m.p;
-      net.bird = m.b;
       net.kids = m.k || [];
       net.stampedAt = performance.now();
 
@@ -299,7 +301,7 @@ function handle(m) {
     case 'burst':
       confetti(m.x, m.y, SKINS[net.color].m, 34);
       shake = 7;
-      lastRun = { ms: m.ms, saves: m.saves, record: m.rec, cause: m.cause };
+      lastRun = { ms: m.ms, saves: m.saves, record: m.rec };
       beep('burst');
       showRecords(m.r);
       break;
@@ -558,17 +560,6 @@ function drawBird(t, bx, by, dir) {
   px(x + 2 * dir, y + wing, C.ink);
 }
 
-// Purely cosmetic — a label riding along with the hazard bird. It's just
-// text drawn near the bird's position; it has no hitbox of its own and
-// can't factor into hitsBird() on the server, which only ever sees bird.x/y.
-const BIRD_LABEL = 'WATCH OUT!';
-function drawBirdLabel(t, bx, by) {
-  const bob = Math.sin(t / 150) * 1.5;
-  const x = Math.round(bx - textWidth(BIRD_LABEL) / 2);
-  const y = Math.round(by - 10 + bob);
-  text(BIRD_LABEL, x, y, C.danger);
-}
-
 const KID_SKIN = '#ffd2a6';
 
 function drawKid(t, x, y, st, dir, id) {
@@ -630,8 +621,7 @@ function drawGameOver() {
   rect(0, 92, W, 1, C.danger);
   rect(0, 147, W, 1, C.danger);
 
-  const headline = lastRun && lastRun.cause === 'bird' ? 'BALLOON POPPED BY BIRD!' : 'THE BALLOON POPPED';
-  textCenter(headline, 100, C.danger);
+  textCenter('THE BALLOON POPPED', 100, C.danger);
   if (lastRun) {
     textCenter('IT FLEW ' + clock(lastRun.ms), 112, C.white);
     textCenter(lastRun.saves + ' SAVES', 121, C.white);
@@ -653,7 +643,9 @@ function frame(now) {
   // Predict where the server's balloon is right now, then ease toward it.
   const since = Math.min((now - net.stampedAt) / 1000, 0.6);
   let px_ = net.x + net.vx * since;
-  let py_ = net.y + net.vy * since + 0.5 * net.g * since * since;
+  // Same model as the server: vy relaxes exponentially toward SINK.
+  const relax = (1 - Math.exp(-world.DRAG * since)) / world.DRAG;
+  let py_ = net.y + world.SINK * since + (net.vy - world.SINK) * relax;
   py_ = Math.max(world.CEIL_Y, Math.min(py_, world.GROUND_Y - world.R));
   px_ = Math.max(world.R + 2, Math.min(px_, W - world.R - 2));
 
@@ -714,14 +706,6 @@ function frame(now) {
     if (!v) continue;
     drawKid(now, v.x, v.y, k.st, k.d, k.id);
     if (k.rb !== undefined) drawBird(now, k.rb, v.y - 7, k.rb < v.x ? 1 : -1);
-  }
-
-  if (net.bird) {
-    const bx = net.bird.x + net.bird.vx * since;
-    if (bx > -6 && bx < W + 6) {
-      drawBird(now, bx, net.bird.y, net.bird.vx >= 0 ? 1 : -1);
-      drawBirdLabel(now, bx, net.bird.y);
-    }
   }
 
   if (net.alive) drawBalloon(now);

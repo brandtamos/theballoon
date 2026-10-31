@@ -35,7 +35,7 @@ a 300 ms per-person cooldown and a 25 messages/second budget per socket.
 
 **`public/game.js`** draws a 160×240 virtual screen at an integer scale, so
 pixels stay square at any window size. Between the 15 Hz snapshots it integrates
-the same gravity the server reports and eases toward the result, so motion looks
+the same sink/drag model the server uses and eases toward the result, so motion looks
 like 60 fps rather than 15. Your own clicks boost locally the instant you make
 them and reconcile a frame or two later.
 
@@ -49,14 +49,14 @@ All at the top of `server.js`:
 
 | Constant | Does what |
 |---|---|
-| `GRAVITY` | Starting fall rate. Higher means more frantic. |
-| `RAMP_SECONDS` | Gravity doubles over this long. Without the ramp, a busy day means the balloon never lands and there is no game. |
+| `FALL_HOURS` | How long an untouched balloon takes to sink from spawn to the ground (1 by default). `SINK` is derived from it. |
+| `DRAG` | How fast a save's upward kick bleeds back into the slow sink. A save lifts it roughly `BOOST_VY / DRAG` px. |
 | `BOOST_VY` | Velocity a save sets. Note it *sets* rather than adds — otherwise a crowd stacks impulses and pins the balloon to the ceiling. |
 | `GRAB` | Hit-test forgiveness in pixels. Raise it for phones. |
 | `BOOST_COOLDOWN` | Stops one person soloing the balloon forever. |
 
-Right now one save buys roughly five seconds, and an untouched balloon falls from
-spawn in about 3.6.
+Right now an untouched balloon takes an hour to reach the ground, and one save
+lifts it about 40 px — roughly 22 more minutes of flight.
 
 ## Records
 
