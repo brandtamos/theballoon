@@ -252,7 +252,7 @@ function connect() {
   };
 }
 
-const HYPE = ['NICE', 'YES', 'FUCK YEA', "THAT'S WHAT'S UP", 'YOU GO GIRL', "COWABUNGA LET'S GO"];
+const HYPE = ['NICE', 'YES', 'AWW YEA', "THAT'S WHAT'S UP", 'YOU GO GIRL', "COWABUNGA LET'S GO"];
 function randomHype() {
   return HYPE[Math.floor(Math.random() * HYPE.length)];
 }
